@@ -40,23 +40,34 @@ export default function Home() {
       setProjectId(null);
       addTerminalLine("Disconnected from WebSocket server", "error");
     };
+    
+    const onConnectError = (data: any) => {
+      setIsSocketConnected(false);
+      setIsConnecting(false);
+      setProjectId(null);
+      addTerminalLine(`Connection error: ${data.message || 'Failed to connect'}`, "error");
+    };
 
     const onConnectionEstablished = (data: any) => {
-      addTerminalLine(`Connection established. Session ID: ${data.sid}`, "success");
+      addTerminalLine(`Connection established. Session ID: ${data.sid || 'unknown'}`, "success");
       createProject();
     };
 
     const onError = (data: any) => {
-      addTerminalLine(`Error: ${data.message}`, "error");
+      addTerminalLine(`Error: ${data.message || 'Unknown error'}`, "error");
+      if (data.message?.includes('not connected')) {
+        setIsSocketConnected(false);
+        setIsConnecting(false);
+      }
     };
 
     const onProjectInitializing = (data: any) => {
-      addTerminalLine(`Project initializing. ID: ${data.project_id}`, "output");
+      addTerminalLine(`Project initializing. ID: ${data.project_id || 'unknown'}`, "output");
     };
 
     const onProjectReady = (data: any) => {
       setProjectId(data.project_id);
-      addTerminalLine(`Project ready. ID: ${data.project_id}`, "success");
+      addTerminalLine(`Project ready. ID: ${data.project_id || 'unknown'}`, "success");
     };
 
     const onCommandResult = (data: any) => {
@@ -69,27 +80,41 @@ export default function Home() {
           addTerminalLine(data.result.output, "output");
         }
       } else if (data.command === 'save_file') {
-        addTerminalLine(`File ${data.args.filename} saved successfully`, "success");
+        addTerminalLine(`File ${data.args?.filename || 'unknown'} saved successfully`, "success");
+      }
+    };
+    
+    const onMessage = (e: any) => {
+      // Handle any generic messages
+      console.log("Generic message received", e.detail);
+      if (typeof e.detail === 'string') {
+        addTerminalLine(e.detail, "output");
+      } else if (e.detail && e.detail.message) {
+        addTerminalLine(e.detail.message, "output");
       }
     };
 
     // Setup socket event listeners
     window.addEventListener('socket:connect', onSocketConnect);
     window.addEventListener('socket:disconnect', onSocketDisconnect);
+    window.addEventListener('socket:connect_error', onConnectError);
     window.addEventListener('socket:connection_established', (e: any) => onConnectionEstablished(e.detail));
     window.addEventListener('socket:error', (e: any) => onError(e.detail));
     window.addEventListener('socket:project_initializing', (e: any) => onProjectInitializing(e.detail));
     window.addEventListener('socket:project_ready', (e: any) => onProjectReady(e.detail));
     window.addEventListener('socket:command_result', (e: any) => onCommandResult(e.detail));
+    window.addEventListener('socket:message', (e: any) => onMessage(e));
 
     return () => {
       window.removeEventListener('socket:connect', onSocketConnect);
       window.removeEventListener('socket:disconnect', onSocketDisconnect);
+      window.removeEventListener('socket:connect_error', onConnectError);
       window.removeEventListener('socket:connection_established', (e: any) => onConnectionEstablished(e.detail));
       window.removeEventListener('socket:error', (e: any) => onError(e.detail));
       window.removeEventListener('socket:project_initializing', (e: any) => onProjectInitializing(e.detail));
       window.removeEventListener('socket:project_ready', (e: any) => onProjectReady(e.detail));
       window.removeEventListener('socket:command_result', (e: any) => onCommandResult(e.detail));
+      window.removeEventListener('socket:message', (e: any) => onMessage(e));
     };
   }, []);
 
@@ -100,11 +125,21 @@ export default function Home() {
       setIsSocketConnected(false);
       setIsConnecting(false);
       setProjectId(null);
+      addTerminalLine("Disconnected from WebSocket server", "output");
     } else {
       // Connect
       setIsConnecting(true);
-      addTerminalLine("Connecting to WebSocket server...", "output");
+      setTerminalOutput([{ text: "Terminal cleared", type: "output" }]);
+      addTerminalLine("Connecting to WebSocket server at ws://3.131.13.46:8000...", "output");
+      addTerminalLine("Please note: If the server is not accessible or not responding, the connection will timeout after 10 seconds.", "output");
       connectToSocket();
+      
+      // Add a timeout to help the user understand what's happening if the connection fails
+      setTimeout(() => {
+        if (!isSocketConnected && isConnecting) {
+          addTerminalLine("Still trying to connect... Please check that the external WebSocket server is running and accessible.", "output");
+        }
+      }, 5000);
     }
   };
 
