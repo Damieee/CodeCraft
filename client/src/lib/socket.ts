@@ -1,214 +1,171 @@
-// Using browser's native WebSocket API
-let socket: WebSocket | null = null;
-let connectionTimeout: ReturnType<typeof setTimeout> | null = null;
+import { io, Socket } from "socket.io-client";
 
-// When we receive messages from the server, dispatch custom events
-const handleMessage = (eventName: string, data: any) => {
-  const event = new CustomEvent(`socket:${eventName}`, { detail: data });
-  window.dispatchEvent(event);
-};
+let socket: Socket | null = null;
 
-// Parse WebSocket message data
-const parseMessage = (data: string) => {
-  try {
-    const parsed = JSON.parse(data);
-    return {
-      event: parsed.event || 'message',
-      data: parsed.data || parsed
-    };
-  } catch (e) {
-    return {
-      event: 'message',
-      data: data
-    };
-  }
-};
+// For debug purposes
+const EXTERNAL_WS_URL = 'ws://3.131.13.46:8000';
+const LOCAL_DEBUG_WS_URL = window.location.protocol === 'https:' 
+  ? `${window.location.origin}/debug-ws`
+  : `${window.location.origin}/debug-ws`;
 
-export const connectToSocket = () => {
-  if (socket && socket.readyState === WebSocket.OPEN) return;
-  
-  // Clear any existing socket
+export function isConnected() {
+  return socket !== null && socket.connected;
+}
+
+export function connectToSocket() {
   if (socket) {
-    socket.close();
-    socket = null;
+    return;
   }
-  
-  // Clear any existing timeout
-  if (connectionTimeout) {
-    clearTimeout(connectionTimeout);
-  }
-  
+
   try {
-    // Use the correct protocol based on the current page protocol
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    
-    // Try to connect directly to the external WebSocket server by default
-    const wsUrl = `${protocol}//3.131.13.46:8000`;
-    
-    // Allow using the local debug server via URL parameter for testing
-    // Example: http://localhost:5000/?debug=true
-    const urlParams = new URLSearchParams(window.location.search);
-    const useDebugServer = urlParams.get('debug') === 'true';
-    
-    // If debug mode is enabled, use the local debug server instead
-    const finalWsUrl = useDebugServer
-      ? `${protocol}//${window.location.host}/debug-ws`
-      : wsUrl;
-    
-    console.log(`Connecting to WebSocket at ${finalWsUrl}${useDebugServer ? ' (debug mode)' : ''}`);
-    
-    // Connect to the selected WebSocket server
-    socket = new WebSocket(finalWsUrl);
-    
-    // Set a timeout to detect connection issues
-    connectionTimeout = setTimeout(() => {
-      if (socket && socket.readyState !== WebSocket.OPEN) {
-        console.error("WebSocket connection timeout");
-        socket.close();
-        handleMessage("connect_error", { message: "Connection timeout - server not responding" });
-        connectionTimeout = null;
-      }
-    }, 10000); // 10 second timeout
-    
-    socket.onopen = () => {
-      console.log("Socket connected successfully");
-      
-      if (connectionTimeout) {
-        clearTimeout(connectionTimeout);
-        connectionTimeout = null;
-      }
-      
-      handleMessage("connect", null);
-      
-      // Immediately after connection, send an initial handshake
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({
-          event: 'connection_request',
-          data: { 
-            client_id: `web_client_${Date.now()}`,
-            client_info: {
-              type: 'web',
-              url: window.location.href,
-              language: navigator.language
-            }
-          }
-        }));
-      }
-    };
-    
-    socket.onclose = (event) => {
-      console.log(`Socket disconnected. Code: ${event.code}, Reason: ${event.reason}`);
-      
-      // Clear timeout if it exists
-      if (connectionTimeout) {
-        clearTimeout(connectionTimeout);
-        connectionTimeout = null;
-      }
-      
-      handleMessage("disconnect", { code: event.code, reason: event.reason });
-    };
-    
-    socket.onerror = (error) => {
-      console.error("Socket error", error);
-      
-      // Clear timeout if it exists
-      if (connectionTimeout) {
-        clearTimeout(connectionTimeout);
-        connectionTimeout = null;
-      }
-      
-      handleMessage("error", { message: "WebSocket connection error" });
-      handleMessage("connect_error", { message: "Failed to connect to server" });
-    };
-    
-    socket.onmessage = (event) => {
-      try {
-        console.log("Raw message received:", event.data);
-        const { event: eventName, data } = parseMessage(event.data);
-        console.log(`Received event: ${eventName}`, data);
-        
-        // Handle specific events
-        switch (eventName) {
-          case 'connection_established':
-            handleMessage("connection_established", data);
-            break;
-          case 'project_initializing':
-            handleMessage("project_initializing", data);
-            break;
-          case 'project_ready':
-            handleMessage("project_ready", data);
-            break;
-          case 'project_error':
-            handleMessage("project_error", data);
-            break;
-          case 'command_result':
-            handleMessage("command_result", data);
-            break;
-          case 'files_changed':
-            handleMessage("files_changed", data);
-            break;
-          case 'ping':
-            // Respond to ping with pong
-            if (socket && socket.readyState === WebSocket.OPEN) {
-              socket.send(JSON.stringify({ event: 'pong' }));
-            }
-            break;
-          default:
-            // For any other message
-            handleMessage("message", data);
-        }
-      } catch (error) {
-        console.error("Error parsing message", error);
-        handleMessage("error", { message: "Failed to parse server message" });
-      }
-    };
-    
-  } catch (error) {
-    console.error("Failed to connect to socket", error);
-    
-    // Clear timeout if it exists
-    if (connectionTimeout) {
-      clearTimeout(connectionTimeout);
-      connectionTimeout = null;
-    }
-    
-    handleMessage("connect_error", { message: "Failed to create WebSocket connection" });
-  }
-};
-
-export const disconnectSocket = () => {
-  // Clear timeout if it exists
-  if (connectionTimeout) {
-    clearTimeout(connectionTimeout);
-    connectionTimeout = null;
-  }
-  
-  if (socket) {
-    socket.close();
-    socket = null;
-  }
-};
-
-export const emit = (event: string, data: any) => {
-  if (socket && socket.readyState === WebSocket.OPEN) {
-    const message = JSON.stringify({
-      event: event,
-      data: data
+    // Using Socket.IO client instead of raw WebSocket
+    socket = io(EXTERNAL_WS_URL, {
+      transports: ['websocket'],
+      reconnectionAttempts: 3,
+      timeout: 10000
     });
     
-    try {
-      socket.send(message);
-      console.log(`Sent event: ${event}`, data);
-    } catch (error) {
-      console.error(`Failed to send event: ${event}`, error);
-      handleMessage("error", { message: "Failed to send message" });
-    }
-  } else {
-    console.error("Cannot emit event: socket is not connected");
-    handleMessage("error", { message: "Socket is not connected" });
-  }
-};
+    socket.on('connect', () => {
+      console.log('Socket connected, sid =', socket.id);
+      dispatchEvent('socket:connect', {});
+      dispatchEvent('socket:connection_established', { sid: socket.id });
+    });
 
-export const isConnected = (): boolean => {
-  return socket !== null && socket.readyState === WebSocket.OPEN;
-};
+    socket.on('disconnect', (reason) => {
+      console.log('Socket disconnected. Reason:', reason);
+      dispatchEvent('socket:disconnect', { reason });
+      socket = null;
+    });
+
+    socket.on('connect_error', (error) => {
+      console.error('Socket connection error:', error);
+      dispatchEvent('socket:connect_error', { message: error.message });
+    });
+
+    // Socket.IO specific events from the test script
+    socket.on('project_initializing', (data) => {
+      dispatchEvent('socket:project_initializing', data);
+    });
+
+    socket.on('project_ready', (data) => {
+      dispatchEvent('socket:project_ready', data);
+    });
+
+    socket.on('command_result', (data) => {
+      dispatchEvent('socket:command_result', data);
+    });
+
+    socket.on('terminalResponse', (data) => {
+      dispatchEvent('socket:command_result', {
+        command: 'terminal_input',
+        result: {
+          output: data.data
+        }
+      });
+    });
+
+    socket.on('error', (error) => {
+      console.error('Socket error:', error);
+      dispatchEvent('socket:error', { message: error.message || 'Unknown error' });
+    });
+    
+  } catch (e) {
+    console.error('Error initializing socket:', e);
+    dispatchEvent('socket:connect_error', { message: String(e) });
+  }
+}
+
+export function connectToLocalDebugSocket() {
+  if (socket) {
+    return;
+  }
+
+  try {
+    console.log('Connecting to local debug WebSocket at:', LOCAL_DEBUG_WS_URL);
+    
+    socket = io(LOCAL_DEBUG_WS_URL, {
+      transports: ['websocket'],
+      path: '/debug-ws', // This path matches your server setup
+      reconnectionAttempts: 3
+    });
+    
+    socket.on('connect', () => {
+      console.log('Local debug socket connected');
+      dispatchEvent('socket:connect', {});
+      dispatchEvent('socket:connection_established', { sid: socket.id });
+    });
+
+    socket.on('disconnect', (reason) => {
+      console.log('Local debug socket disconnected. Reason:', reason);
+      dispatchEvent('socket:disconnect', { reason });
+      socket = null;
+    });
+
+    socket.on('connect_error', (error) => {
+      console.error('Local debug socket error:', error);
+      dispatchEvent('socket:connect_error', { message: error.message });
+    });
+
+    // Standard events
+    socket.on('project_initializing', (data) => {
+      dispatchEvent('socket:project_initializing', data);
+    });
+
+    socket.on('project_ready', (data) => {
+      dispatchEvent('socket:project_ready', data);
+    });
+
+    socket.on('command_result', (data) => {
+      dispatchEvent('socket:command_result', data);
+    });
+
+    socket.on('terminalResponse', (data) => {
+      dispatchEvent('socket:command_result', {
+        command: 'terminal_input',
+        result: {
+          output: data.data
+        }
+      });
+    });
+    
+    // Debug server events
+    socket.on('debug_echo', (data) => {
+      console.log('Debug echo received:', data);
+      dispatchEvent('socket:message', data);
+    });
+    
+  } catch (e) {
+    console.error('Error initializing local debug socket:', e);
+    dispatchEvent('socket:connect_error', { message: String(e) });
+  }
+}
+
+export function disconnectSocket() {
+  if (socket) {
+    socket.disconnect();
+    socket = null;
+  }
+}
+
+export function emit(eventName: string, data: any) {
+  if (!socket || !socket.connected) {
+    console.error('Socket not connected');
+    dispatchEvent('socket:error', { message: 'Socket not connected' });
+    return false;
+  }
+
+  try {
+    // For Socket.IO, we can directly emit events
+    socket.emit(eventName, data);
+    return true;
+  } catch (e) {
+    console.error('Error sending message:', e);
+    dispatchEvent('socket:error', { message: String(e) });
+    return false;
+  }
+}
+
+function dispatchEvent(eventName: string, data: any) {
+  const event = new CustomEvent(eventName, { detail: data });
+  window.dispatchEvent(event);
+}

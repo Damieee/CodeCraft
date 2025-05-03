@@ -3,7 +3,7 @@ import CodeEditor from "@/components/CodeEditor";
 import Terminal from "@/components/Terminal";
 import Toolbar from "@/components/Toolbar";
 import { useResizable } from "@/hooks/use-resizable";
-import { connectToSocket, disconnectSocket, isConnected, emit } from "@/lib/socket";
+import { connectToSocket, disconnectSocket, isConnected, emit, connectToLocalDebugSocket } from "@/lib/socket";
 import { useMobile } from "@/hooks/use-mobile";
 
 export default function Home() {
@@ -17,7 +17,8 @@ export default function Home() {
     { text: "Welcome to the Code Editor Terminal.", type: "output" },
     { text: "Connect to the WebSocket to start coding.", type: "output" },
   ]);
-  
+  const [connectionAttempts, setConnectionAttempts] = useState(0);
+
   const isMobile = useMobile();
   
   // Terminal height with resizer
@@ -44,8 +45,16 @@ export default function Home() {
     const onConnectError = (data: any) => {
       setIsSocketConnected(false);
       setIsConnecting(false);
-      setProjectId(null);
-      addTerminalLine(`Connection error: ${data.message || 'Failed to connect'}`, "error");
+      
+      // If we fail to connect to the external server, try the local debug server
+      if (!projectId && connectionAttempts < 2) {
+        setConnectionAttempts(prev => prev + 1);
+        addTerminalLine("Connection to external server failed. Trying local debug server...", "warning");
+        connectToLocalDebugSocket();
+      } else {
+        setProjectId(null);
+        addTerminalLine(`Connection error: ${data.message || 'Failed to connect'}`, "error");
+      }
     };
 
     const onConnectionEstablished = (data: any) => {
@@ -116,7 +125,7 @@ export default function Home() {
       window.removeEventListener('socket:command_result', (e: any) => onCommandResult(e.detail));
       window.removeEventListener('socket:message', (e: any) => onMessage(e));
     };
-  }, []);
+  }, [connectionAttempts]);
 
   const handleConnect = () => {
     if (isSocketConnected) {
@@ -125,31 +134,29 @@ export default function Home() {
       setIsSocketConnected(false);
       setIsConnecting(false);
       setProjectId(null);
+      setConnectionAttempts(0);
       addTerminalLine("Disconnected from WebSocket server", "output");
     } else {
       // Connect
       setIsConnecting(true);
+      setConnectionAttempts(0);
       setTerminalOutput([{ text: "Terminal cleared", type: "output" }]);
       addTerminalLine("Connecting to WebSocket server at ws://3.131.13.46:8000...", "output");
-      addTerminalLine("Please note: If the server is not accessible or not responding, the connection will timeout after 10 seconds.", "output");
+      addTerminalLine("Using Socket.IO protocol with WebSocket transport", "output");
       connectToSocket();
       
       // Add a timeout to help the user understand what's happening if the connection fails
       setTimeout(() => {
         if (!isSocketConnected && isConnecting) {
-          addTerminalLine("Still trying to connect... Please check that the external WebSocket server is running and accessible.", "output");
+          addTerminalLine("Still trying to connect... If external server is not accessible, we'll attempt to use local debug server.", "output");
         }
       }, 5000);
     }
   };
 
   const createProject = () => {
-    const projectData = {
-      type: 'base',
-      id: `project-${Date.now()}`
-    };
-    
-    emit('create_project', projectData);
+    // For Socket.IO, we directly emit the event without wrapping it
+    emit('create_project', { type: 'base' });
     addTerminalLine(`Creating new project...`, "output");
   };
 
@@ -192,6 +199,10 @@ export default function Home() {
   };
 
   const handleRunCode = () => {
+    console.log("is socket connected", isSocketConnected)
+    console.log("project id", projectId)
+    console.log("file name", filename)
+    
     if (!isSocketConnected || !projectId) {
       addTerminalLine('Not connected to a project', 'error');
       return;
@@ -202,11 +213,11 @@ export default function Home() {
       return;
     }
 
-    // First save the file
+    // For Socket.IO, we need to use the correct event name and structure
     emit('project_command', {
-      command: 'save_file',
+      command: 'saveFile',
       args: {
-        filename: filename,
+        path: `/home/user/project/${filename}`,
         content: code
       }
     });
@@ -218,12 +229,12 @@ export default function Home() {
     let runCommand = '';
 
     if (extension === 'py') {
-      runCommand = `python ${filename}`;
+      runCommand = `python /home/user/project/${filename}`;
     } else if (extension === 'java') {
       const className = filename.replace('.java', '');
-      runCommand = `javac ${filename} && java ${className}`;
+      runCommand = `javac /home/user/project/${filename} && java -cp /home/user/project ${className}`;
     } else if (extension === 'js') {
-      runCommand = `node ${filename}`;
+      runCommand = `node /home/user/project/${filename}`;
     } else {
       addTerminalLine(`Unsupported file type: ${extension}`, 'error');
       return;
@@ -231,10 +242,12 @@ export default function Home() {
 
     addTerminalLine(`Running: ${runCommand}`, 'command');
 
+    // Send the run command
     emit('project_command', {
-      command: 'terminal_input',
+      command: 'runCommand',
       args: {
-        input: runCommand
+        terminal_id: `term_${projectId}`,
+        command: runCommand
       }
     });
   };
@@ -248,11 +261,12 @@ export default function Home() {
     // Add command to terminal display
     addTerminalLine(`$ ${input}`, 'command');
 
-    // Send the command to server
+    // Send the command to server using Socket.IO format
     emit('project_command', {
-      command: 'terminal_input',
+      command: 'runCommand',
       args: {
-        input: input
+        terminal_id: `term_${projectId}`,
+        command: input
       }
     });
   };
