@@ -28,7 +28,7 @@ export default function Toolbar({
   return (
     <div className="bg-slate-800 border-b border-slate-700 p-3 flex items-center justify-between">
       <div className="flex items-center space-x-4">
-        <h1 className="text-xl font-bold text-white">Code Editor</h1>
+        <h1 className="text-xl font-bold text-white">LTD Code Editor</h1>
         
         {/* Language Selector */}
         <Select

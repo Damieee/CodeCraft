@@ -12,9 +12,9 @@ export default function Home() {
   const [projectId, setProjectId] = useState<string | null>(null);
   const [language, setLanguage] = useState("python");
   const [filename, setFilename] = useState("main.py");
-  const [code, setCode] = useState("# Welcome to the Code Editor\n# Connect to the WebSocket and write your code here\n# Then click the Run button to execute\n\nprint(\"Hello, World!\")\n");
+  const [code, setCode] = useState("# Welcome to LTD Code Editor\n# Connect to the WebSocket and write your code here\n# Then click the Run button to execute\n\nprint(\"Hello, World!\")\n");
   const [terminalOutput, setTerminalOutput] = useState<Array<{text: string, type: string}>>([
-    { text: "Welcome to the Code Editor Terminal.", type: "output" },
+    { text: "Welcome to LTD Code Editor Terminal.", type: "output" },
     { text: "Connect to the WebSocket to start coding.", type: "output" },
   ]);
   const [connectionAttempts, setConnectionAttempts] = useState(0);
